@@ -58,6 +58,8 @@
 /* used to reset ESP to defaults and force restart or to reset the mode to access point mode */
 #ifdef CONFIG_IDF_TARGET_ESP32C3
 #define DB_RESET_PIN GPIO_NUM_9
+#elif CONFIG_IDF_TARGET_ESP32C5
+#define DB_RESET_PIN GPIO_NUM_9
 #elif CONFIG_IDF_TARGET_ESP32C6
 #define DB_RESET_PIN GPIO_NUM_9
 #elif CONFIG_IDF_TARGET_ESP32S2
@@ -319,9 +321,23 @@ void db_init_wifi_apmode(int wifi_mode) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     if (wifi_mode == DB_WIFI_MODE_AP_LR) {
         ESP_LOGI(TAG, "Enabling LR Mode on access point. This device will be invisible to non-ESP32 devices!");
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+        wifi_protocols_t protocols = {
+            .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_LR,
+        };
+        ESP_ERROR_CHECK(esp_wifi_set_protocols(WIFI_IF_AP, &protocols));
+#else
         ESP_ERROR_CHECK(esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_LR));
+#endif
     } else {
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+        wifi_protocols_t protocols = {
+            .ghz_2g = WIFI_PROTOCOL_11B,
+        };
+        ESP_ERROR_CHECK(esp_wifi_set_protocols(WIFI_IF_AP, &protocols));
+#else
         ESP_ERROR_CHECK(esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B));
+#endif
     }
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     wifi_country_t wifi_country = {.cc = "US", .schan = 1, .nchan = 13, .policy = WIFI_COUNTRY_POLICY_MANUAL};
@@ -406,14 +422,26 @@ int db_init_wifi_clientmode() {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     if (DB_PARAM_WIFI_EN_GN) {
         // only makes sense if the AP can not do proper N or you do not need range or want Wi-Fi 6 ax support
-#ifdef CONFIG_IDF_TARGET_ESP32C6
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+        wifi_protocols_t protocols = {
+            .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AX | WIFI_PROTOCOL_LR,
+        };
+        ESP_ERROR_CHECK(esp_wifi_set_protocols(WIFI_IF_STA, &protocols));
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
         ESP_ERROR_CHECK(esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AX | WIFI_PROTOCOL_LR));
 #else
         ESP_ERROR_CHECK(esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N |
                                                            WIFI_PROTOCOL_LR));
 #endif
     } else {
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+        wifi_protocols_t protocols = {
+            .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_LR,
+        };
+        ESP_ERROR_CHECK(esp_wifi_set_protocols(WIFI_IF_STA, &protocols));  // range for sure
+#else
         ESP_ERROR_CHECK(esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_LR));  // range for sure
+#endif
     }
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE)); // disable power saving
@@ -470,7 +498,14 @@ void db_init_wifi_espnow() {
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_channel(DB_PARAM_CHANNEL, WIFI_SECOND_CHAN_NONE));
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+    wifi_protocols_t protocols = {
+        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_LR,
+    };
+    ESP_ERROR_CHECK(esp_wifi_set_protocols(WIFI_IF_STA, &protocols));
+#else
     ESP_ERROR_CHECK(esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_LR));
+#endif
     ESP_LOGI(TAG, "Enabled ESP-NOW WiFi Mode! LR Mode is set. This device will be invisible to non-ESP32 devices!");
     ESP_ERROR_CHECK(esp_read_mac(LOCAL_MAC_ADDRESS, ESP_MAC_WIFI_STA));
 }
