@@ -740,6 +740,20 @@ void db_param_write_all_params_nvs(const nvs_handle_t *nvs_handle) {
  * @param root_obj JSON that contains a single layer with the parameters to change.
  */
 void db_param_read_all_params_json(const cJSON *root_obj) {
+    // Support legacy S3 parameter names for backward compatibility
+    cJSON *legacy_static_ip = cJSON_GetObjectItem(root_obj, "static_client_ip");
+    if (legacy_static_ip && !cJSON_IsNull(legacy_static_ip)) {
+        db_param_is_valid_assign_str(legacy_static_ip->valuestring, &db_param_wifi_sta_ip);
+    }
+    cJSON *legacy_netmask = cJSON_GetObjectItem(root_obj, "static_netmask");
+    if (legacy_netmask && !cJSON_IsNull(legacy_netmask)) {
+        db_param_is_valid_assign_str(legacy_netmask->valuestring, &db_param_wifi_sta_netmask);
+    }
+    cJSON *legacy_gw = cJSON_GetObjectItem(root_obj, "static_gw_ip");
+    if (legacy_gw && !cJSON_IsNull(legacy_gw)) {
+        db_param_is_valid_assign_str(legacy_gw->valuestring, &db_param_wifi_sta_gw);
+    }
+
     for (int i = 0; i < sizeof(db_params) / sizeof(db_params[0]); i++) {
         cJSON *jobject = cJSON_GetObjectItem(root_obj, (char *) db_params[i]->db_name);
         switch (db_params[i]->type) {

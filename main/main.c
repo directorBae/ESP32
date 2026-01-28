@@ -100,34 +100,27 @@ static esp_err_t db_set_dns_server(esp_netif_t *netif, uint32_t addr, esp_netif_
 }
 
 /**
- * Assigns static IP to ESP32 when in client mode and static IP, GW and netmask are set in config.
- * Stops client DHCP server
+ * Finalizes static IP configuration after WiFi connection.
+ * The IP was already set during netif initialization, this just sets DNS.
  */
 static void set_client_static_ip() {
     if (DB_PARAM_RADIO_MODE == DB_WIFI_MODE_STA && strlen((char *) DB_PARAM_STA_IP) > 0 &&
         strlen((char *) DB_PARAM_STA_GW) > 0 &&
         strlen((char *) DB_PARAM_STA_IP_NETMASK) > 0) {
-        ESP_LOGI(TAG, "Assigning static IP to ESP32: ESP32-IP: %s Gateway: %s Netmask: %s", (char *) DB_PARAM_STA_IP,
-                 (char *) DB_PARAM_STA_GW, (char *) DB_PARAM_STA_IP_NETMASK);
+        ESP_LOGI(TAG, "Finalizing static IP configuration - setting DNS servers");
 
-        if (esp_netif_dhcpc_stop(esp_default_netif) != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to stop dhcp client in order to set static IP");
+        if (esp_default_netif == NULL) {
+            ESP_LOGE(TAG, "esp_default_netif is NULL - cannot set DNS");
             return;
         }
-        esp_netif_ip_info_t ip;
-        memset(&ip, 0, sizeof(esp_netif_ip_info_t));
-        ip.ip.addr = ipaddr_addr((char *) DB_PARAM_STA_IP);
-        ip.netmask.addr = ipaddr_addr((char *) DB_PARAM_STA_IP_NETMASK);
-        ip.gw.addr = ipaddr_addr((char *) DB_PARAM_STA_GW);
-        if (esp_netif_set_ip_info(esp_default_netif, &ip) != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to set static ip info");
-        }
-        ESP_LOGD(TAG, "Success to set static ip: %s, netmask: %s, gw: %s", (char *) DB_PARAM_STA_IP,
-                 (char *) DB_PARAM_STA_IP_NETMASK,
-                 (char *) DB_PARAM_STA_GW);
+        
+        // Set DNS servers (IP was already configured during netif init)
         ESP_ERROR_CHECK(
                 db_set_dns_server(esp_default_netif, ipaddr_addr((char *) DB_PARAM_STA_GW), ESP_NETIF_DNS_MAIN));
         ESP_ERROR_CHECK(db_set_dns_server(esp_default_netif, ipaddr_addr("0.0.0.0"), ESP_NETIF_DNS_BACKUP));
+        
+        ESP_LOGI(TAG, "Static IP configuration finalized: IP=%s, Netmask=%s, Gateway=%s", 
+                 (char *) DB_PARAM_STA_IP, (char *) DB_PARAM_STA_IP_NETMASK, (char *) DB_PARAM_STA_GW);
     } else {
         //no static IP specified let the DHCP assign us one
     }
@@ -180,6 +173,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             ESP_LOGW(TAG, "Did not start Wi-Fi since autopilot told us he is armed (WIFI_EVENT_STA_START)");
         }
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+        // Set static IP after WiFi connects but before DHCP (ESP-IDF official example pattern)
         set_client_static_ip();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         ESP_LOGI(TAG, "WIFI_EVENT_STA_DISCONNECTED - Lost connection to access point");
@@ -376,6 +370,34 @@ int db_init_wifi_clientmode() {
     assert(esp_default_netif);
     ESP_ERROR_CHECK(
             esp_netif_set_hostname(esp_default_netif, (char *) db_param_wifi_hostname.value.db_param_str.value));
+
+    // If static IP is configured, stop DHCP and set IP immediately after netif creation
+    // This prevents "invalid static ip" error from esp_netif_handlers validation
+    if (strlen((char *) DB_PARAM_STA_IP) > 0 && strlen((char *) DB_PARAM_STA_GW) > 0 && 
+        strlen((char *) DB_PARAM_STA_IP_NETMASK) > 0) {
+        ESP_LOGI(TAG, "Static IP configured - stopping DHCP and setting IP before WiFi init");
+        esp_err_t err = esp_netif_dhcpc_stop(esp_default_netif);
+        if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+            ESP_LOGE(TAG, "Failed to stop DHCP client early: %s", esp_err_to_name(err));
+        }
+        
+        // Set static IP immediately to avoid "invalid static ip" error
+        esp_netif_ip_info_t ip;
+        memset(&ip, 0, sizeof(esp_netif_ip_info_t));
+        ip.ip.addr = ipaddr_addr((char *) DB_PARAM_STA_IP);
+        ip.netmask.addr = ipaddr_addr((char *) DB_PARAM_STA_IP_NETMASK);
+        ip.gw.addr = ipaddr_addr((char *) DB_PARAM_STA_GW);
+        
+        ESP_LOGI(TAG, "Pre-setting IP info - IP: %s, Netmask: %s, Gateway: %s", 
+                 (char *) DB_PARAM_STA_IP, (char *) DB_PARAM_STA_IP_NETMASK, (char *) DB_PARAM_STA_GW);
+        
+        esp_err_t set_ip_err = esp_netif_set_ip_info(esp_default_netif, &ip);
+        if (set_ip_err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to pre-set static ip info: %s", esp_err_to_name(set_ip_err));
+        } else {
+            ESP_LOGI(TAG, "Static IP pre-set successfully before WiFi start");
+        }
+    }
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
